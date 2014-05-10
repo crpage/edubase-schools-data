@@ -41,6 +41,8 @@ def shallow_scrape():
         ### get new page
         try:
             resultspage = br.follow_link(text="Next")
+            sqlite.save_var('last_page', c)
+
             c += 1
             if c % 2 == 0:
                 time.sleep(10)
@@ -49,7 +51,6 @@ def shallow_scrape():
             c = 1
             break
     
-    sqlite.save_var('last_page', c - 1)
 
 keys_to_keep = [
 'Local Authority', 'Type of Establishment', 'Locality', 'Establishment Number', 'School Capacity', 'Statutory Lowest Pupil Age', 
