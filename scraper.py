@@ -15,22 +15,20 @@ def main():
     urns = shallow_scrape()
     
     for urn in urns:
+        print "  URN: " + urn
         deep_scrape(urn)
-        time.sleep(0.05)
 
 
 def shallow_scrape():
-    urns = set([])
-
     br = mechanize.Browser()
     resultspage = br.open("http://www.education.gov.uk/edubase/quickSearchResult.xhtml")
 
-    c = sqlite.get_var('last_page', 0)
-    c += 1
+    c = sqlite.get_var('last_page', 0) + 1
     max_c = c + 10
     
     while c < max_c:
-        print "Handling page %d..."%c
+        print "Handling page %d..." % c
+        print "  [" + br.geturl() + "]"
     
         ### extract data from page
         page = html.parse(resultspage)
@@ -38,7 +36,6 @@ def shallow_scrape():
         for u in page.getroot().findall("body/div/div/div/div/table/tr/td/table/tbody/tr/td/a"):
             urn = re.search("urn=([0-9]{6})", u.get("href")).group(1)
             yield urn
-            #urns.add(urn)
 
         ### get new page
         try:
@@ -55,7 +52,7 @@ def shallow_scrape():
 
 keys_to_keep = [
 'Local Authority', 'Type of Establishment', 'Locality', 'Establishment Number', 'School Capacity', 'Statutory Lowest Pupil Age', 
-'Status', 'Website Address',  'Town', 'Telephone Number', 'Gender', 'URN', 'Establishment No', 
+'Status', 'Website Address',  'Town', 'Telephone Number', 'Gender', 'URN', 
 'Northing', 'Total Number of Children', 'Urban / Rural', 'Age Range', 'Establishment Type Group', 'Phase of Education', 
 'Headteacher', 'Statutory Highest Pupil Age', 'County', 'Street', 'Postcode', 'Easting', 'Establishment Name', 'Address 3'
 ]
@@ -76,9 +73,23 @@ def deep_scrape(urn):
     merge_in(page_scrape('communications', urn))
     merge_in(page_scrape('regional-indicators', urn))
     
-    data = { key: data[key] for key in keys_to_keep }
+    try:
+        if "Headteacher" not in data:
+            data["Headteacher"] = "".join([
+                data["Headteacher Title"],
+                data["Headteacher First Name"],
+                data["Headteacher Last Name"]
+            ])
+        
+        if data["Easting"] == "" or data["Northing"] == "":
+            raise Exception("No Location Data")
+
+        data = { key: data[key] for key in keys_to_keep }
     
-    sqlite.save(unique_keys=["URN"], data=data)
+        sqlite.save(unique_keys=["URN"], data=data)
+    
+    except Exception as e:
+        print "Error: " + e.message
     #return data
 
 
@@ -124,4 +135,6 @@ def table_extract(page):
 
     return data
 
-main()
+if __name__ == "__main__":
+    main()
+    
