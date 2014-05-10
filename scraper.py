@@ -4,21 +4,20 @@ Obtains the edubase schools database
 http://www.edubase.gov.uk
 """
 
-from scraperwiki import datastore, scrape
-from html5lib import HTMLParser, treebuilders
-from lxml import etree
+from scraperwiki import sqlite, scrape
+from lxml import html
 import mechanize
 import re
+import time
+
 
 def main():
-    print "Phase I: getting list of URNs:"
     urns = shallow_scrape()
-    print "... acquired %d URNs"%(len(urns))
-    print "Phase II: acquiring school data:"
+    
     for urn in urns:
         deep_scrape(urn)
+        time.sleep(0.05)
 
-pre = ''
 
 def shallow_scrape():
     urns = set([])
@@ -26,113 +25,103 @@ def shallow_scrape():
     br = mechanize.Browser()
     resultspage = br.open("http://www.education.gov.uk/edubase/quickSearchResult.xhtml")
 
-    moreWorkToDo = True
-    c = 1
-
-    while moreWorkToDo and (c<3):
+    c = sqlite.get_var('last_page', 0)
+    c += 1
+    max_c = c + 10
+    
+    while c < max_c:
         print "Handling page %d..."%c
     
         ### extract data from page
-        parser = HTMLParser(tree=treebuilders.getTreeBuilder("lxml"))
-        page = parser.parse(resultspage)
+        page = html.parse(resultspage)
 
-        for u in page.getroot().findall(path(["body","div","div","div","div","table","tbody","tr","td","table","tbody","tr","td","a"],"")):
-            #href = u.attrib.get("href","")
-            href = u.get("href")
-            print "href: %s"%href
-            urn = re.search("urn=([0-9]{6})",href).group(1)
-            urns.add(urn)
-            print "%s, "%urn
-        print
+        for u in page.getroot().findall("body/div/div/div/div/table/tr/td/table/tbody/tr/td/a"):
+            urn = re.search("urn=([0-9]{6})", u.get("href")).group(1)
+            yield urn
+            #urns.add(urn)
 
         ### get new page
         try:
             resultspage = br.follow_link(text="Next")
             c += 1
+            if c % 2 == 0:
+                time.sleep(10)
+                
         except mechanize.LinkNotFoundError:
-            moreWorkToDo = False
+            c = 1
+            break
+    
+    sqlite.save_var('last_page', c - 1)
 
-    return urns
-
-def path(l,s):
-    return "/".join([s+x for x in l])
+keys_to_keep = [
+'Local Authority', 'Type of Establishment', 'Locality', 'Establishment Number', 'School Capacity', 'Statutory Lowest Pupil Age', 
+'Status', 'Website Address',  'Town', 'Telephone Number', 'Gender', 'URN', 'Establishment No', 
+'Northing', 'Total Number of Children', 'Urban / Rural', 'Age Range', 'Establishment Type Group', 'Phase of Education', 
+'Headteacher', 'Statutory Highest Pupil Age', 'County', 'Street', 'Postcode', 'Easting', 'Establishment Name', 'Address 3'
+]
 
 def deep_scrape(urn):
-    print "URN: %s"%urn
-    keyvaluepairs = {}
+    data = {}
 
     def merge_in(d):
-        "update keyvaluepairs with d; complain if anything is overwritten"
+        "update data with d; complain if anything is overwritten"
         for (k,v) in d.iteritems():
-            if k in keyvaluepairs:
-                assert keyvaluepairs[k] == v
+            if k in data:
+                assert data[k] == v, "%s: [%s] != [%s]" % (k, data[k], v)
             else:
-                keyvaluepairs[k] = v
+                data[k] = v
 
     merge_in(summary_scrape(urn))
     merge_in(page_scrape('general', urn))
-    merge_in(page_scrape('school-characterisics', urn))
-    merge_in(page_scrape('links', urn))
-    merge_in(page_scrape('sen', urn))
-    merge_in(page_scrape('pru', urn))
-    merge_in(page_scrape('quality-indicators', urn))
     merge_in(page_scrape('communications', urn))
-    merge_in(page_scrape('census-data', urn))
     merge_in(page_scrape('regional-indicators', urn))
     
-    datastore.save(unique_keys=["URN"],data=keyvaluepairs)
-    print
+    data = { key: data[key] for key in keys_to_keep }
+    
+    sqlite.save(unique_keys=["URN"], data=data)
+    #return data
 
-postcode = re.compile("^([A-Z][A-Z]?[0-9][0-9]?[A-Z]?)\s*([0-9][ABDEFGHJLNPQRSTUWXYZ][ABDEFGHJLNPQRSTUWXYZ])$")
 
-def summary_scrape(urn):    
-    print " - summary"
+def summary_scrape(urn):
     url = "http://www.education.gov.uk/edubase/establishment/summary.xhtml?urn=" + urn
-    parser = HTMLParser(tree=treebuilders.getTreeBuilder("lxml"))
-    page = parser.parse(scrape(url))
+    page = html.fromstring(scrape(url))
 
-    keyvaluepairs = table_extract(page)
+    data = table_extract(page)
 
-    raw_address = [x.strip() for x in keyvaluepairs.pop("").split(" / ")]
-    if postcode.match(raw_address[-1]):
-        keyvaluepairs["Postcode"] = raw_address[-1]
-        raw_address = raw_address[:-1]
-    keyvaluepairs["Address"] = " / ".join(raw_address)
+    for t in page.findall("body/div/div/div/div/table/tr/td/h1"):
+        key, value = t.text.split(": ", 1)
+        data[key] = value
 
-    for t in page.findall(path(["body","div","div","div","div","table","tbody","tr","td","h1"],pre)):
-        x = t.text.split(": ")
-        keyvaluepairs[x[0]] = x[1]
+    for t in page.findall("body/div/div/div/div/table/tr/td/div/p/b"):
+        data[t.text.strip().strip(":")] = (t.tail or "").strip()
 
-    for t in page.findall(path(["body","div","div","div","div","table","tbody","tr","td","div","p","b"],pre)):
-        keyvaluepairs[t.text.strip().strip(":")] = (t.tail or "").strip()
-
-    return keyvaluepairs
+    return data
 
 
 def page_scrape(name, urn):
-    print name
     url = "http://www.education.gov.uk/edubase/establishment/"+name+".xhtml"+"?urn="+urn
-    parser = HTMLParser(tree=treebuilders.getTreeBuilder("lxml"))
-    page = parser.parse(scrape(url))
+    page = html.fromstring(scrape(url))
     return table_extract(page)
 
 def table_extract(page):
-    keyvaluepairs = {}
-    for tr in page.findall(path(["body","div","div","div","div","table","tbody","tr","td","div","table","tbody","tr","td","table","tbody","tr"],pre)):
-        th = tr.find(path(["th"],pre))
-        if th != None:
-            k = (th.text or "")
-        else:
-            k = ""
-        td = tr.find(path(["td"],pre))
-        if td != None:
-            v = (td.text or "")
-        else:
-            v = ""
-        if k in keyvaluepairs:
-            keyvaluepairs[k] = keyvaluepairs[k] + " / " + v
-        else:
-            keyvaluepairs[k] = v
-    return keyvaluepairs
+    data = {}
+    
+    for tr in page.findall("body/div/div/div/div/table/tr/td/" + "div/table//tr"):
+        for a, b in ((1,1), (2,3)):
+            th = tr.find("th[%s]" % a)
+            td = tr.find("td[%s]" % b)
+
+            key = (th.text or "") if th is not None else ""
+            value = (td.text or "") if td is not None else ""
+
+            if key in data:
+                data[key] = data[key] + " / " + value
+            else:
+                data[key] = value
+    
+    if "" in data:
+        del data[""]
+
+    return data
 
 main()
