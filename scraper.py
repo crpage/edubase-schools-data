@@ -23,7 +23,7 @@ def shallow_scrape():
     br = mechanize.Browser()
 
     c = sqlite.get_var('last_page', 0) + 1
-    max_c = c + 10
+    max_c = c + 100
     
     resultspage = br.open("http://www.education.gov.uk/edubase/quickSearchResult.xhtml?page=%d" % c)
 
