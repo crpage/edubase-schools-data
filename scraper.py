@@ -13,10 +13,23 @@ import time
 
 def main():
     urns = shallow_scrape()
+    try_again = []
     
     for urn in urns:
         print "  URN: " + urn
-        deep_scrape(urn)
+        
+        try:
+            deep_scrape(urn)
+        except:
+            try_again.append(urn)
+            print "  Failed!"
+
+    for urn in try_again:
+        print "Retry: " + urn
+        try:
+            deep_scrape(urn)
+        except:
+            print "  Failed"
 
 
 def shallow_scrape():
@@ -28,6 +41,7 @@ def shallow_scrape():
     resultspage = br.open("http://www.education.gov.uk/edubase/quickSearchResult.xhtml?page=%d" % c)
 
     while c < max_c:
+        print ""
         print "Handling page %d..." % c
         print "  [" + br.geturl() + "]"
     
