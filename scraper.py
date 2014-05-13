@@ -36,7 +36,7 @@ def shallow_scrape():
     br = mechanize.Browser()
 
     c = sqlite.get_var('last_page', 0) + 1
-    max_c = c + 100
+    max_c = c + 6
     
     resultspage = br.open("http://www.education.gov.uk/edubase/quickSearchResult.xhtml?page=%d" % c)
 
@@ -62,7 +62,8 @@ def shallow_scrape():
                 time.sleep(10)
                 
         except mechanize.LinkNotFoundError:
-            c = 1
+            c += 1
+            sqlite.save_var('last_page', 0)
             break
     
 
